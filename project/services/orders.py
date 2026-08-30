@@ -92,6 +92,11 @@ async def create_order(
     await session.flush()
     return order
 
+async def active_orders(session: AsyncSession, limit: int = 20) -> list[Order]:
+    return list(await session.scalars(
+        select(Order).where(Order.status.in_(ACTIVE))
+        .order_by(Order.id.desc()).limit(limit).options(*LOAD)
+    ))
 
 async def submit(session: AsyncSession, order: Order) -> Order:
     return await transition(session, order, OrderStatus.REVIEW, actor="client")

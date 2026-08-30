@@ -7,6 +7,8 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -19,11 +21,33 @@ router = Router()
 router.message.filter(F.from_user.id == settings.admin_id)
 router.callback_query.filter(F.from_user.id == settings.admin_id)
 
+A_RATE = "💱 Курсы"
+A_ORDERS = "📂 Активные"
+A_STATS = "📊 Статистика"
+A_SVC = "🗂 Сервисы"
+
 
 class AdminFlow(StatesGroup):
     reject_reason = State()
     cost_input = State()
+    rate_input = State()
+    cross_input = State()
 
+
+def admin_menu() -> ReplyKeyboardMarkup:
+    b = ReplyKeyboardBuilder()
+    b.add(KeyboardButton(text=A_RATE))
+    b.add(KeyboardButton(text=A_ORDERS))
+    b.add(KeyboardButton(text=A_STATS))
+    b.add(KeyboardButton(text=A_SVC))
+    b.adjust(2, 2)
+    return b.as_markup(resize_keyboard=True)
+
+
+@router.message(Command("admin"))
+async def on_admin(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await msg.answer("Админка", reply_markup=admin_menu())
 
 async def notify(bot: Bot, tg_id: int, text: str) -> None:
     try:
@@ -53,6 +77,72 @@ async def on_rate(msg: Message, session: AsyncSession) -> None:
     await set_settle_rate(session, value)
     await msg.answer(f"USD = {value} ₽")
 
+@router.message(F.text == A_RATE)
+async def on_rate_menu(msg: Message, session: AsyncSession) -> None:
+    rows = await all_rates(session)
+    out = []
+    for r in rows:
+        if r.currency == "USD":
+            out.append(f"USD: <b>{r.base_rate}</b> ₽ за доллар")
+        elif r.to_usd is not None:
+            out.append(f"{r.currency}: <b>{r.to_usd}</b> USD за единицу")
+
+    b = InlineKeyboardBuilder()
+    b.button(text="✏️ Курс доллара", callback_data="rate:usd")
+    b.button(text="✏️ Кросс-курс", callback_data="rate:cross")
+    b.adjust(1)
+
+    await msg.answer(
+        "\n".join(out) or "курсы не заданы", reply_markup=b.as_markup()
+    )
+
+
+@router.callback_query(F.data == "rate:usd")
+async def on_rate_ask(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFlow.rate_input)
+    await cb.message.answer("Сколько рублей за доллар? Например: 104")
+    await cb.answer()
+
+
+@router.message(AdminFlow.rate_input)
+async def on_rate_set(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    try:
+        value = Decimal((msg.text or "").replace(",", "."))
+    except InvalidOperation:
+        await msg.answer("Числом, например: 104")
+        return
+    await set_settle_rate(session, value)
+    await state.clear()
+    await msg.answer(f"USD = {value} ₽", reply_markup=admin_menu())
+
+
+@router.callback_query(F.data == "rate:cross")
+async def on_cross_ask(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFlow.cross_input)
+    await cb.message.answer("Валюта и курс к доллару. Например: EUR 1.16")
+    await cb.answer()
+
+
+@router.message(AdminFlow.cross_input)
+async def on_cross_set(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    parts = (msg.text or "").split()
+    try:
+        currency = parts[0].upper()
+        value = Decimal(parts[1].replace(",", "."))
+    except (IndexError, InvalidOperation):
+        await msg.answer("Формат: EUR 1.16")
+        return
+    if currency == "USD":
+        await msg.answer("USD — базовая валюта, кросс не нужен")
+        return
+    await set_cross(session, currency, value)
+    await state.clear()
+    await msg.answer(f"1 {currency} = {value} USD", reply_markup=admin_menu())
+
 
 @router.message(Command("cross"))
 async def on_cross(msg: Message, session: AsyncSession) -> None:
@@ -71,6 +161,7 @@ async def on_cross(msg: Message, session: AsyncSession) -> None:
 
 
 @router.message(Command("stats"))
+@router.message(F.text == A_STATS)
 async def on_stats(msg: Message, session: AsyncSession) -> None:
     now = datetime.now(timezone.utc)
     day = await svc.stats_since(session, now - timedelta(days=1))
@@ -81,6 +172,15 @@ async def on_stats(msg: Message, session: AsyncSession) -> None:
         f"<b>7 дней</b>: {week['count']} шт · "
         f"{week['turnover']} ₽ · профит {week['profit']} ₽"
     )
+
+@router.message(F.text == A_ORDERS)
+async def on_active(msg: Message, session: AsyncSession) -> None:
+    rows = await svc.active_orders(session)
+    if not rows:
+        await msg.answer("Активных заявок нет")
+        return
+    for order in rows:
+        await msg.answer(card(order), reply_markup=kb_admin(order))
 
 
 @router.message(Command("order"))
@@ -96,10 +196,11 @@ async def on_order(msg: Message, session: AsyncSession) -> None:
     await msg.answer(card(order), reply_markup=kb_admin(order))
 
 @router.message(Command("svc"))
+@router.message(F.text == A_SVC)
 async def on_svc(msg: Message, session: AsyncSession) -> None:
-    parts = (msg.text or "").split(maxsplit=3)
-
-    if len(parts) == 1:
+    parts = (msg.text or "").split()
+    
+    if not parts or parts[0].startswith("🗂") or len(parts) == 1:
         rows = await session.scalars(select(Service).order_by(Service.title))
         await msg.answer("\n".join(
             f"{s.id}. {s.title} ({s.slug}, {s.currency})"
