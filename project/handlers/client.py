@@ -248,7 +248,7 @@ async def ask_currency(msg: Message, state: FSMContext, session: AsyncSession) -
 
     rates = await all_rates(session)
     if not rates:
-        await message.answer("Курсы не заданы, напиши чуть позже.")
+        await msg.answer("Курсы не заданы, напиши чуть позже.")
         await state.clear()
         return
 
@@ -259,4 +259,4 @@ async def ask_currency(msg: Message, state: FSMContext, session: AsyncSession) -
 
 
     await state.set_state(NewOrder.currency)
-    await message.answer("В какой валюте счёт?", reply_markup=b.as_markup())
+    await msg.answer("В какой валюте счёт?", reply_markup=b.as_markup())
