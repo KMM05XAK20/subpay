@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     requisites: str = "реквизиты не заданы"
     support_username: str = "knaa005"
-
+    max_amount_foreign: float = 1000.0
     quote_ttl_minutes: int = 30
     default_markup_pct: float = 20.0
     max_active_orders: int = 3

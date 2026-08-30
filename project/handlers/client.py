@@ -184,7 +184,7 @@ async def on_amount(
 
     if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
         await msg.answer("Сначала закончим заявку или отправь /cancel")
-    return
+        return
 
     try:
         amount = Decimal((msg.text or "").replace(",", ".")).quantize(
