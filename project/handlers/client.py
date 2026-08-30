@@ -5,7 +5,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,30 +29,61 @@ class NewOrder(StatesGroup):
     confirm = State()
 
 
-@router.message(CommandStart())
-async def on_start(msg: Message) -> None:
-    await msg.answer(
-        "Оплачиваю зарубежные сервисы.\n\n"
-        "/new — новая заявка\n"
-        "/my — мои заявки\n"
-        "/rules — правила\n\n"
-        "Порядок: сервис и сумма → я подтверждаю → реквизиты → "
-        "ты платишь → я оплачиваю."
-    )
+BTN_NEW = "🧾 Новая заявка"
+BTN_MY = "📂 Мои заявки"
+BTN_RULES = "📋 Правила"
+BTN_HELP = "💬 Написать админу"
 
+
+def main_menu() -> ReplyKeyboardMarkup:
+    b = ReplyKeyboardBuilder()
+    b.add(KeyboardButton(text=BTN_NEW))
+    b.add(KeyboardButton(text=BTN_MY))
+    b.add(KeyboardButton(text=BTN_RULES))
+    b.add(KeyboardButton(text=BTN_HELP))
+    b.adjust(1, 3)
+    return b.as_markup(resize_keyboard=True)
+
+
+@router.message(CommandStart())
+async def on_start(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await msg.answer(
+        "<b>Оплачиваю зарубежные сервисы</b>\n\n"
+        "Подписки, облака, инструменты для работы — всё, что не проходит "
+        "российской картой.\n\n"
+        "<b>Как это работает</b>\n"
+        "1. Говоришь, что оплатить и на какую сумму\n"
+        "2. Считаю стоимость в рублях по текущему курсу\n"
+        "3. Подтверждаю, что смогу оплатить, и присылаю реквизиты\n"
+        "4. Переводишь — я оплачиваю сервис\n\n"
+        "Пароли от аккаунтов не запрашиваю. Если оплатить не получится — "
+        "возвращаю всю сумму.\n\n"
+        f"Вопросы: @{settings.support_username}",
+        reply_markup=main_menu(),
+    )
 
 @router.message(Command("rules"))
+@router.message(F.text == BTN_RULES)
 async def on_rules(msg: Message) -> None:
     await msg.answer(
-        f"1. Курс фиксируется на {settings.quote_ttl_minutes} минут "
-        f"с момента подтверждения.\n"
-        "2. Платить нужно ровно указанную сумму, включая копейки.\n"
-        "3. Если оплатить сервис не получится — возвращаю полную сумму.\n"
-        "4. Пароли от аккаунтов не запрашиваю и не принимаю."
+        "<b>Правила</b>\n\n"
+        f"<b>Курс.</b> Фиксируется на {settings.quote_ttl_minutes} минут "
+        "с момента подтверждения заявки. Не успел оплатить — "
+        "оформляем заново по новому курсу.\n\n"
+        "<b>Оплата.</b> Переводи ровно ту сумму, что я пришлю, включая "
+        "копейки — по ним я нахожу твой платёж.\n\n"
+        "<b>Если не получилось.</b> Не смог оплатить сервис — возвращаю "
+        "всю сумму на твои реквизиты в течение суток.\n\n"
+        "<b>Доступы.</b> Пароли и коды от аккаунтов не запрашиваю. "
+        "Если кто-то просит их от моего имени — это не я.\n\n"
+        "<b>Сроки.</b> Отвечаю на заявку в течение часа, оплачиваю "
+        "в тот же день.\n\n"
+        f"Вопросы: @{settings.support_username}"
     )
 
-
 @router.message(Command("new"))
+@router.message(F.text == BTN_NEW)
 async def on_new(
     msg: Message, state: FSMContext, session: AsyncSession, user: User
 ) -> None:
@@ -125,6 +157,11 @@ async def ask_currency(
 async def on_details(
     msg: Message, state: FSMContext, session: AsyncSession
 ) -> None:
+
+    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
+        await msg.answer("Сначала закончим заявку или отправь /cancel")
+        return
+
     await state.update_data(service_raw=(msg.text or "")[:128])
     await ask_currency(msg, state, session)
 
@@ -140,6 +177,11 @@ async def on_currency(cb: CallbackQuery, state: FSMContext) -> None:
 async def on_amount(
     msg: Message, state: FSMContext, session: AsyncSession, user: User
 ) -> None:
+
+    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
+        await msg.answer("Сначала закончим заявку или отправь /cancel")
+    return
+
     try:
         amount = Decimal((msg.text or "").replace(",", ".")).quantize(
             Decimal("0.01")
@@ -238,12 +280,22 @@ async def on_cancel(
 
 
 @router.message(Command("my"))
+@router.message(F.text == BTN_MY)
 async def on_my(msg: Message, session: AsyncSession, user: User) -> None:
     rows = await svc.user_orders(session, user)
     if not rows:
         await msg.answer("Заявок пока нет. /new")
         return
     await msg.answer("\n".join(order_line(o) for o in rows))
+
+
+@router.message(F.text == BTN_HELP)
+async def on_help(msg: Message):
+    await msg.answer(
+        f"Пиши @{settings.support_username} — отвечу лично.\n\n"
+        "Если по заявке уже переведены деньги, а бот молчит — "
+        "это самый быстрый способ меня найти."
+    )
 
 async def ask_currency(msg: Message, state: FSMContext, session: AsyncSession) -> None:
 

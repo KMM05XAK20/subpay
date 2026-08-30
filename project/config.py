@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     db_url: str
     redis_url: str = "redis://localhost:6379/0"
     requisites: str = "реквизиты не заданы"
+    support_username: str = "knaa005"
 
     quote_ttl_minutes: int = 30
     default_markup_pct: float = 20.0
