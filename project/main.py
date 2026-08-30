@@ -8,6 +8,8 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.client.session.aiohttp import AiohttpSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+
 
 from .config import settings
 from .db import init_models, sessionmaker
@@ -16,6 +18,29 @@ from .middlewares.db import DbSessionMiddleware
 from .middlewares.users import UserMiddleware
 from .services.orders import expire_stale
 
+
+
+async def setup_commands(bot: Bot) -> None:
+    await bot.set_my_commands(
+        [
+            BotCommand(command="new", description="Новая заявка"),
+            BotCommand(command="my", description="Мои заявки"),
+            BotCommand(command="rules", description="Правила"),
+            BotCommand(command="cancel", description="Отменить заявку"),
+        ],
+        scope=BotCommandScopeDefault(),
+    )
+    await bot.set_my_commands(
+        [
+            BotCommand(command="admin", description="Админка"),
+            BotCommand(command="rate", description="Курс доллара"),
+            BotCommand(command="cross", description="Кросс-курс"),
+            BotCommand(command="order", description="Заявка по номеру"),
+            BotCommand(command="svc", description="Сервисы"),
+            BotCommand(command="stats", description="Статистика"),
+        ],
+        scope=BotCommandScopeChat(chat_id=settings.admin_id),
+    )
 
 async def expire_job(bot: Bot) -> None:
     async with sessionmaker() as session:
@@ -56,11 +81,14 @@ async def main() -> None:
     dp.include_router(admin.router)   # первым: у него фильтр по admin_id
     dp.include_router(client.router)
 
+    
     sched = AsyncIOScheduler()
     sched.add_job(expire_job, "interval", minutes=1, args=(bot,))
     sched.start()
 
+    await setup_commands(bot)
     await bot.send_message(settings.admin_id, "Бот поднялся")
+    
     try:
         await dp.start_polling(bot)
     finally:
