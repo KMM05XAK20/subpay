@@ -46,6 +46,8 @@ def card(order: Order) -> str:
         lines.append(f"Коммент: {escape(order.client_note)}")
     if order.admin_note:
         lines.append(f"Заметка: {escape(order.admin_note)}")
+    if order.amount_usd is not None and order.currency != "USD":
+        lines.append(f"Тебе платить: <b>{order.amount_usd} USD</b>")
     if order.cost_rub is not None:
         lines.append(
             f"Себестоимость: {order.cost_rub} ₽ | Профит: {order.profit_rub} ₽"

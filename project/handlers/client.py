@@ -14,6 +14,7 @@ from ..models import Service, User
 from ..order_states import OrderStatus
 from ..services import orders as svc
 from ..services.rates import get_base_rate, all_rates
+from ..services.rates import available_currencies, get_quote_input
 from ..views import card, kb_admin, order_line
 
 router = Router()
@@ -103,12 +104,37 @@ async def on_cancel_fsm(msg: Message, state: FSMContext) -> None:
     await state.clear()
     await msg.answer("Отменил. /new - начать заново.")
 
-@router.message(NewOrder.details)
-async def on_details(msg: Message, state: FSMContext) -> None:
-    await state.update_data(service_raw=(msg.text or "")[:128])
-    await state.set_state(NewOrder.amount)
-    await msg.answer("Сумма в валюте сервиса? Например: 19.99")
+async def ask_currency(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    currencies = await available_currencies(session)
+    if not currencies:
+        await message.answer("Курсы не заданы, напиши чуть позже.")
+        await state.clear()
+        return
 
+    b = InlineKeyboardBuilder()
+    for cur in currencies:
+        b.button(text=cur, callback_data=f"cur:{cur}")
+    b.adjust(3)
+
+    await state.set_state(NewOrder.currency)
+    await message.answer("В какой валюте счёт?", reply_markup=b.as_markup())
+
+@router.message(NewOrder.details)
+async def on_details(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    await state.update_data(service_raw=(msg.text or "")[:128])
+    await ask_currency(msg, state, session)
+
+
+@router.callback_query(NewOrder.currency, F.data.startswith("cur:"))
+async def on_currency(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(currency=cb.data.split(":")[1])
+    await state.set_state(NewOrder.amount)
+    await cb.message.edit_text("Сумма в этой валюте? Например: 19.99")
+    await cb.answer()
 
 @router.message(NewOrder.amount)
 async def on_amount(
@@ -138,18 +164,19 @@ async def on_amount(
         await msg.answer(f"Максимум для {service.title}: {service.max_amount}")
         return
 
-    currency = service.currency if service else "USD"
+    currency = service.currency if service else data.get("currency", "USD")
     try:
-        base = await get_base_rate(session, currency)
+        base, to_usd = await get_quote_input(session, currency)
     except LookupError:
         await msg.answer("Курс временно недоступен, напиши чуть позже.")
         await state.clear()
         return
 
     order = await svc.create_order(
-        session, user, amount, base,
+        session, user, amount, base, to_usd,
         service=service, service_raw=data.get("service_raw"),
     )
+    
     await session.commit()
 
     await state.update_data(order_id=order.id)

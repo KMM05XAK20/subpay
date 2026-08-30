@@ -57,6 +57,7 @@ async def create_order(
     user: User,
     amount_foreign: Decimal,
     base_rate: Decimal,
+    to_usd: Decimal = Decimal(1),
     service: Service | None = None,
     service_raw: str | None = None,
     client_note: str | None = None,
@@ -66,12 +67,14 @@ async def create_order(
         else Decimal(str(settings.default_markup_pct))
     )
     client_rate, amount_rub = calc_quote(amount_foreign, base_rate, markup)
+    amount_usd = (amount_foreign * to_usd).quantize(Decimal("0.01"))
 
     order = Order(
         user_id=user.id,
         service_id=service.id if service else None,
         service_raw=service_raw,
         amount_foreign=amount_foreign,
+        amount_usd=amount_usd,
         currency=service.currency if service else "USD",
         base_rate=base_rate,
         markup_pct=markup,

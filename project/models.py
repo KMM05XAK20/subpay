@@ -50,6 +50,7 @@ class Rate(Base):
 
     currency: Mapped[str] = mapped_column(String(3), primary_key=True)
     base_rate: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    to_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -65,6 +66,7 @@ class Order(Base):
 
     # что оплачиваем
     amount_foreign: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    amount_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
 
     # снапшот курса на момент расчёта — не пересчитывать никогда

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
-from ..services.rates import all_rates, set_base_rate
+from ..services.rates import all_rates, set_base_rate, set_cross
 from ..views import card, kb_admin, payment_text
 
 router = Router()
@@ -37,19 +37,37 @@ async def on_rate(msg: Message, session: AsyncSession) -> None:
     parts = (msg.text or "").split()
     if len(parts) == 1:
         rows = await all_rates(session)
-        await msg.answer("\n".join(
-            f"{r.currency}: {r.base_rate} (обн. {r.updated_at:%d.%m %H:%M})"
-            for r in rows
-        ) or "курсы не заданы")
+        out = []
+        for r in rows:
+            if r.currency == "USD":
+                out.append(f"USD: {r.base_rate} ₽ за доллар")
+            else:
+                out.append(f"{r.currency}: {r.to_usd} USD за единицу")
+        await msg.answer("\n".join(out) or "курсы не заданы")
         return
+    try:
+        value = Decimal(parts[1].replace(",", "."))
+    except (IndexError, InvalidOperation):
+        await msg.answer("Формат: /rate 100.5  (рублей за доллар)")
+        return
+    await set_settle_rate(session, value)
+    await msg.answer(f"USD = {value} ₽")
+
+
+@router.message(Command("cross"))
+async def on_cross(msg: Message, session: AsyncSession) -> None:
+    parts = (msg.text or "").split()
     try:
         currency = parts[1].upper()
         value = Decimal(parts[2].replace(",", "."))
     except (IndexError, InvalidOperation):
-        await msg.answer("Формат: /rate USD 100.5")
+        await msg.answer("Формат: /cross EUR 1.08  (долларов за евро)")
         return
-    await set_base_rate(session, currency, value)
-    await msg.answer(f"{currency} = {value} ₽")
+    if currency == "USD":
+        await msg.answer("USD — базовая валюта, кросс не нужен")
+        return
+    await set_cross(session, currency, value)
+    await msg.answer(f"1 {currency} = {value} USD")
 
 
 @router.message(Command("stats"))
