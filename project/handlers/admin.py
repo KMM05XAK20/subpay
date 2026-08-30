@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
-from ..services.rates import all_rates, set_base_rate, set_cross
+from ..services.rates import all_rates, set_settle_rate, set_cross
 from ..views import card, kb_admin, payment_text
 
 router = Router()
