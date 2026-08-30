@@ -174,6 +174,7 @@ async def on_amount(
 
     order = await svc.create_order(
         session, user, amount, base, to_usd,
+        currency=currency,
         service=service, service_raw=data.get("service_raw"),
     )
     

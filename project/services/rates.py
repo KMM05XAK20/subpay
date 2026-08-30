@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Rate
+from ..config import settings
 
 SETTLE = "USD"
 
@@ -23,6 +24,7 @@ async def get_quote_input(
     if row is None or row.to_usd is None:
         raise LookupError(currency)
 
+    buffer = Decimal(1) + Decimal(str(settings.cross_buffer_pct)) / 100
     base = (settle.base_rate * row.to_usd).quantize(
         Decimal("0.0001"), rounding=ROUND_HALF_UP
     )

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     quote_ttl_minutes: int = 30
     default_markup_pct: float = 20.0
     max_active_orders: int = 3
+    cross_buffer_pct: float = 2.0
 
 
 settings = Settings()
