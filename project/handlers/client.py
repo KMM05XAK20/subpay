@@ -13,7 +13,7 @@ from ..config import settings
 from ..models import Service, User
 from ..order_states import OrderStatus
 from ..services import orders as svc
-from ..services.rates import get_base_rate, all_rates
+from ..services.rates import set_settle_rate, all_rates
 from ..services.rates import available_currencies, get_quote_input
 from ..views import card, kb_admin, order_line
 
