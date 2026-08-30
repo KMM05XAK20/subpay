@@ -10,7 +10,7 @@ from ..models import Order, OrderLog, Service, User
 from ..order_states import ACTIVE, TERMINAL, OrderStatus, check_transition
 from ..pricing import calc_quote, expires_at, pick_pay_code
 
-LOAD = (selectinload(Order.user), selectinload(Order.service_id))
+LOAD = (selectinload(Order.user),)
 
 
 async def get_order(session: AsyncSession, order_id: int) -> Order | None:
