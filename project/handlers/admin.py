@@ -10,12 +10,14 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from ..config import settings
 from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
 from ..services.rates import all_rates, set_settle_rate, set_cross
 from ..views import card, kb_admin, payment_text
+from ..models import Service
 
 router = Router()
 router.message.filter(F.from_user.id == settings.admin_id)
