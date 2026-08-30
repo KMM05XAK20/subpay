@@ -18,6 +18,8 @@ from ..services.rates import set_settle_rate, all_rates
 from ..services.rates import available_currencies, get_quote_input
 from ..views import card, kb_admin, order_line
 
+import logging
+
 router = Router()
 
 
