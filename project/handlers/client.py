@@ -178,6 +178,8 @@ async def on_amount(
     msg: Message, state: FSMContext, session: AsyncSession, user: User
 ) -> None:
 
+    logging.info("on_amount: text=%r data=%r", msg.text, await state.get_data())
+
     if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
         await msg.answer("Сначала закончим заявку или отправь /cancel")
     return
@@ -297,19 +299,3 @@ async def on_help(msg: Message):
         "это самый быстрый способ меня найти."
     )
 
-async def ask_currency(msg: Message, state: FSMContext, session: AsyncSession) -> None:
-
-    rates = await all_rates(session)
-    if not rates:
-        await msg.answer("Курсы не заданы, напиши чуть позже.")
-        await state.clear()
-        return
-
-    b = InlineKeyboardBuilder()
-    for r in rates:
-        b.button(text=r.currency, callback_data=f"cur:{r.currency}")
-    b.adjust(3)
-
-
-    await state.set_state(NewOrder.currency)
-    await msg.answer("В какой валюте счёт?", reply_markup=b.as_markup())
