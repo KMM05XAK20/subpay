@@ -21,7 +21,7 @@ class UserMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         session = data["session"]
-        user = await session.scalar(select(User).where(User.tg_id == tg_user.id).where(User.full_name == tg_user.full_name))
+        user = await session.scalar(select(User).where(User.tg_id == tg_user.id))
         if user is None:
             user = User(tg_id=tg_user.id, username=tg_user.username, full_name=tg_user.full_name)
             session.add(user)
