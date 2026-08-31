@@ -3,7 +3,7 @@ from html import escape
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .models import Order
-from .order_states import TITLES, OrderStatus
+from .order_states import TITLES, OrderStatus, TERMINAL
 
 
 def kb_admin(order: Order):
@@ -26,19 +26,24 @@ def kb_admin(order: Order):
     elif st is OrderStatus.REFUND_PENDING:
         b.button(text="✅ Вернул", callback_data=f"ord:refunded:{oid}")
 
+    if st not in TERMINAL:
+        b.button(text="💬 Написать", callback_data=f"ord:msg:{oid}")
+
     b.adjust(2)
     return b.as_markup()
 
 
 def card(order: Order) -> str:
     """Карточка для админа. Всё пользовательское — через escape."""
+    name =  escape(order.user.full_name or "клиент")
+    handle = f" (@{escape(order.user.username)})" if order.user.username else ""
     lines = [
         f"<b>Заявка #{order.id}</b> — {TITLES[OrderStatus(order.status)]}",
         f"Сервис: {escape(order.service_title)}",
         f"К оплате: {order.amount_foreign} {order.currency}",
         f"Курс: {order.base_rate} → {order.client_rate} (+{order.markup_pct}%)",
         f"С клиента: <b>{order.total_rub} ₽</b>",
-        f"Клиент: @{escape(order.user.username or str(order.user.tg_id))}",
+        f'Клиент: <a href="tg://user?id={order.user.tg_id}">{name}</a>{handle}',
     ]
     if order.payment_link:
         lines.append(f"Ссылка: {escape(order.payment_link)}")

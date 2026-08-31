@@ -9,9 +9,10 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from html import escape
 
 from ..config import settings
-from ..models import Service, User
+from ..models import Service, User, OrderLog
 from ..order_states import OrderStatus
 from ..services import orders as svc
 from ..services.rates import set_settle_rate, all_rates
@@ -19,6 +20,7 @@ from ..services.rates import available_currencies, get_quote_input
 from ..views import card, kb_admin, order_line
 
 import logging
+import re
 
 router = Router()
 
@@ -301,3 +303,31 @@ async def on_help(msg: Message):
         "это самый быстрый способ меня найти."
     )
 
+
+@router.message(F.reply_to_message)
+async def on_client_reply(
+    msg: Message, session: AsyncSession, user: User, bot: Bot
+) -> None:
+    src = msg.reply_to_message.text or ""
+    match = re.search(r"заявке #(\d+)", src)
+    if match is None:
+        return
+
+    order_id = int(match.group(1))
+    order = await svc.get_order(session, order_id)
+    if order is None or order.user_id != user.id:
+        return
+
+    text = msg.text or ""
+    await bot.send_message(
+        settings.admin_id,
+        f"<b>Ответ по #{order.id}</b> от "
+        f'<a href="tg://user?id={user.tg_id}">'
+        f"{escape(user.full_name or 'клиент')}</a>\n\n{escape(text)}",
+        reply_markup=kb_admin(order),
+    )
+    session.add(OrderLog(order_id=order.id, src=order.status,
+                         dst=order.status, actor="client",
+                         comment=f"← от клиента: {text[:200]}"))
+    await session.commit()
+    await msg.answer("Передал, отвечу скоро.")

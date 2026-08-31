@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-
+from html import escape
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -17,7 +17,7 @@ from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
 from ..services.rates import all_rates, set_settle_rate, set_cross
 from ..views import card, kb_admin, payment_text
-from ..models import Service
+from ..models import Service, OrderLog
 
 router = Router()
 router.message.filter(F.from_user.id == settings.admin_id)
@@ -34,6 +34,7 @@ class AdminFlow(StatesGroup):
     cost_input = State()
     rate_input = State()
     cross_input = State()
+    dm_input = State()
 
 
 def admin_menu() -> ReplyKeyboardMarkup:
@@ -246,6 +247,7 @@ async def on_action(
     expected = {
         "approve": OrderStatus.REVIEW,
         "reject": OrderStatus.REVIEW,
+        "msg": None,                                # ??
         "paid": OrderStatus.AWAITING_PAYMENT,
         "expire": OrderStatus.AWAITING_PAYMENT,
         "work": OrderStatus.PAID,
@@ -273,6 +275,16 @@ async def on_action(
             await state.set_state(AdminFlow.reject_reason)
             await state.update_data(order_id=order.id)
             await cb.message.answer(f"#{order.id}: причина отказа?")
+            await cb.answer()
+            return
+
+        elif action == "msg":
+            await state.set_state(AdminFlow.dm_input)
+            await state.update_data(order_id=order.id)
+            await cb.message.answer(
+                f"Что написать клиенту по #{order.id}? "
+                f"Отправь текст или /cancel"
+            )
             await cb.answer()
             return
 
@@ -363,3 +375,27 @@ async def on_cost(
     await notify(bot, order.user.tg_id, f"Заявка #{order.id} выполнена ✅")
     await msg.answer(f"Закрыта #{order.id}. Профит: {order.profit_rub or '—'} ₽")
     await state.clear()
+
+@router.message(AdminFlow.dm_input)
+async def on_dm(
+    msg: Message, state: FSMContext, session: AsyncSession, bot: Bot
+) -> None:
+    data = await state.get_data()
+    order = await svc.get_order(session, data["order_id"])
+    if order is None:
+        await state.clear()
+        await msg.answer("Заявка не найдена")
+        return
+
+    text = msg.text or ""
+    sent = await bot.send_message(
+        order.user.tg_id,
+        f"<b>Сообщение по заявке #{order.id}</b>\n\n{escape(text)}\n\n"
+        f"<i>Ответь на это сообщение, чтобы написать мне.</i>",
+    )
+    session.add(OrderLog(order_id=order.id, src=order.status,
+                         dst=order.status, actor=f"admin:{msg.from_user.id}",
+                         comment=f"→ клиенту: {text[:200]}"))
+    await session.commit()
+    await state.clear()
+    await msg.answer(f"Отправлено по #{order.id}")
