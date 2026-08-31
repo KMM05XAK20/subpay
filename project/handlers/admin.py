@@ -390,7 +390,8 @@ async def on_dm(
     text = msg.text or ""
     sent = await bot.send_message(
         order.user.tg_id,
-        f"<b>Сообщение по заявке #{order.id}</b>\n\n{escape(text)}\n\n"
+        f"📨 <b>Сообщение по заявке #{order.id}</b>\n"
+        f"<blockquote>{escape(text)}</blockquote>\n"
         f"<i>Ответь на это сообщение, чтобы написать мне.</i>",
     )
     session.add(OrderLog(order_id=order.id, src=order.status,

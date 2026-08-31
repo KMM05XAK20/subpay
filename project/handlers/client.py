@@ -319,13 +319,16 @@ async def on_client_reply(
         return
 
     text = msg.text or ""
+    handle = f" (@{escape(user.username)})" if user.username else ""
     await bot.send_message(
         settings.admin_id,
-        f"<b>Ответ по #{order.id}</b> от "
-        f'<a href="tg://user?id={user.tg_id}">'
-        f"{escape(user.full_name or 'клиент')}</a>\n\n{escape(text)}",
+        f"💬 <b>Ответ по #{order.id}</b>\n"
+        f'от <a href="tg://user?id={user.tg_id}">'
+        f"{escape(user.full_name or 'клиент')}</a>{handle}\n"
+        f"<blockquote>{escape(text)}</blockquote>",
         reply_markup=kb_admin(order),
     )
+    
     session.add(OrderLog(order_id=order.id, src=order.status,
                          dst=order.status, actor="client",
                          comment=f"← от клиента: {text[:200]}"))
