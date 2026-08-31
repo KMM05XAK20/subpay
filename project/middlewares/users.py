@@ -23,7 +23,7 @@ class UserMiddleware(BaseMiddleware):
         session = data["session"]
         user = await session.scalar(select(User).where(User.tg_id == tg_user.id).where(User.full_name == tg_user.full_name))
         if user is None:
-            user = User(tg_id=tg_user.id, username=tg_user.username, full_name=full_name)
+            user = User(tg_id=tg_user.id, username=tg_user.username, full_name=tg_user.full_name)
             session.add(user)
             await session.commit()
         elif (user.username != tg_user.username or user.full_name != tg_user.full_name):
