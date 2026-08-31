@@ -21,13 +21,14 @@ class UserMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         session = data["session"]
-        user = await session.scalar(select(User).where(User.tg_id == tg_user.id))
+        user = await session.scalar(select(User).where(User.tg_id == tg_user.id).where(User.full_name == tg_user.full_name))
         if user is None:
-            user = User(tg_id=tg_user.id, username=tg_user.username)
+            user = User(tg_id=tg_user.id, username=tg_user.username, full_name=full_name)
             session.add(user)
             await session.commit()
-        elif user.username != tg_user.username:
+        elif (user.username != tg_user.username or user.full_name != tg_user.full_name):
             user.username = tg_user.username
+            user.full_name = tg_user.full_name
             await session.commit()
 
         if user.is_blocked:
