@@ -26,6 +26,7 @@ async def setup_commands(bot: Bot) -> None:
             BotCommand(command="new", description="Новая заявка"),
             BotCommand(command="my", description="Мои заявки"),
             BotCommand(command="rules", description="Правила"),
+            BotCommand(command="calc", description="Посчитать стоимость"),
             BotCommand(command="cancel", description="Отменить заявку"),
         ],
         scope=BotCommandScopeDefault(),

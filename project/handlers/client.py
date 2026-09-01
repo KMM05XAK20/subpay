@@ -18,7 +18,7 @@ from ..services import orders as svc
 from ..services.rates import set_settle_rate, all_rates
 from ..services.rates import available_currencies, get_quote_input
 from ..views import card, kb_admin, order_line
-
+from ..pricing import calc_quote
 import logging
 import re
 
@@ -36,7 +36,11 @@ class NewOrder(StatesGroup):
 BTN_NEW = "🧾 Новая заявка"
 BTN_MY = "📂 Мои заявки"
 BTN_RULES = "📋 Правила"
+BTN_CALC = "🧮 Посчитать"
 BTN_HELP = "💬 Написать админу"
+
+class Calc(StatesGroup):
+    amount = State()
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -44,8 +48,9 @@ def main_menu() -> ReplyKeyboardMarkup:
     b.add(KeyboardButton(text=BTN_NEW))
     b.add(KeyboardButton(text=BTN_MY))
     b.add(KeyboardButton(text=BTN_RULES))
+    b.add(KeyboardButton(text=BTN_CALC))
     b.add(KeyboardButton(text=BTN_HELP))
-    b.adjust(1, 3)
+    b.adjust(1, 2, 2)
     return b.as_markup(resize_keyboard=True)
 
 
@@ -162,7 +167,7 @@ async def on_details(
     msg: Message, state: FSMContext, session: AsyncSession
 ) -> None:
 
-    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
+    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_CALC, BTN_HELP}:
         await msg.answer("Сначала закончим заявку или отправь /cancel")
         return
 
@@ -184,7 +189,7 @@ async def on_amount(
 
     logging.info("on_amount: text=%r data=%r", msg.text, await state.get_data())
 
-    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_HELP}:
+    if (msg.text or "") in {BTN_NEW, BTN_MY, BTN_RULES, BTN_CALC, BTN_HELP}:
         await msg.answer("Сначала закончим заявку или отправь /cancel")
         return
 
@@ -241,6 +246,96 @@ async def on_amount(
         f"Точную сумму пришлю после подтверждения.",
         reply_markup=b.as_markup(),
     )
+
+async def show_calc(
+    msg: Message, session: AsyncSession, amount: Decimal, currency: str
+) -> bool:
+    try:
+        base, _ = await get_quote_input(session, currency)
+    except LookupError:
+        await msg.answer(f"Курса для {currency} пока нет.")
+        return False
+
+    markup = Decimal(str(settings.default_markup_pct))
+    client_rate, total = calc_quote(amount, base, markup)
+
+    await msg.answer(
+        f"<b>{amount} {currency}</b> ≈ <b>{total} ₽</b>\n"
+        f"<i>по курсу {client_rate} ₽ за {currency}</i>\n\n"
+        f"Курс плавает — точная сумма фиксируется при оформлении заявки.",
+        reply_markup=main_menu(),
+    )
+    return True
+
+
+@router.message(Command("calc"))
+async def on_calc_cmd(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    await state.clear()
+    parts = (msg.text or "").split()
+
+    if len(parts) == 1:
+        await ask_calc(msg, state, session)
+        return
+
+    try:
+        amount = Decimal(parts[1].replace(",", ".")).quantize(Decimal("0.01"))
+    except InvalidOperation:
+        await msg.answer("Формат: /calc 20 USD")
+        return
+    if amount <= 0:
+        await msg.answer("Сумма должна быть больше нуля.")
+        return
+
+    currency = parts[2].upper() if len(parts) > 2 else "USD"
+    await show_calc(msg, session, amount, currency)
+
+
+async def ask_calc(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    currencies = await available_currencies(session)
+    if not currencies:
+        await msg.answer("Курсы не заданы, напиши чуть позже.")
+        return
+    await state.set_state(Calc.amount)
+    await msg.answer(
+        f"Сумма и валюта — например: <code>20 USD</code>\n"
+        f"Доступно: {', '.join(currencies)}"
+    )
+
+
+@router.message(F.text == BTN_CALC)
+async def on_calc_btn(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    await state.clear()
+    await ask_calc(msg, state, session)
+
+
+@router.message(Calc.amount)
+async def on_calc_amount(
+    msg: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    if (msg.text or "") in {BTN_NEW, BTN_CALC, BTN_MY, BTN_RULES, BTN_HELP}:
+        await state.clear()
+        await msg.answer("Отменил расчёт.")
+        return
+
+    parts = (msg.text or "").split()
+    try:
+        amount = Decimal(parts[0].replace(",", ".")).quantize(Decimal("0.01"))
+    except (IndexError, InvalidOperation):
+        await msg.answer("Не понял. Например: 20 USD")
+        return
+    if amount <= 0:
+        await msg.answer("Сумма должна быть больше нуля.")
+        return
+
+    currency = parts[1].upper() if len(parts) > 1 else "USD"
+    if await show_calc(msg, session, amount, currency):
+        await state.clear()
 
 
 @router.callback_query(NewOrder.confirm, F.data.startswith("cl:submit:"))
@@ -328,7 +423,7 @@ async def on_client_reply(
         f"<blockquote>{escape(text)}</blockquote>",
         reply_markup=kb_admin(order),
     )
-    
+
     session.add(OrderLog(order_id=order.id, src=order.status,
                          dst=order.status, actor="client",
                          comment=f"← от клиента: {text[:200]}"))
