@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Order, User
@@ -19,17 +19,21 @@ class UserRow:
     last_seen: datetime | None
 
 
-
-async def user_rows(session: AsyncSession, only_cold: bool = False, limit: int = 15) -> list[UserRow]:
+async def user_rows(
+    session: AsyncSession, only_cold: bool = False, limit: int = 15
+) -> list[UserRow]:
     """only_cold — те, кто ни разу не доводил заявку до оплаты."""
-    done_sum = func.sum(
-        func.case((Order.status == OrderStatus.DONE, Order.amount_rub), else_=0)
-    )
     done_cnt = func.count(
-        func.nullif(Order.status != OrderStatus.DONE, True)
+        case((Order.status == OrderStatus.DONE, Order.id))
+    )
+    done_sum = func.coalesce(
+        func.sum(
+            case((Order.status == OrderStatus.DONE, Order.amount_rub), else_=0)
+        ),
+        0,
     )
     active_cnt = func.count(
-        func.nullif(~Order.status.in_(ACTIVE), True)
+        case((Order.status.in_(ACTIVE), Order.id))
     )
 
     stmt = (
@@ -37,13 +41,15 @@ async def user_rows(session: AsyncSession, only_cold: bool = False, limit: int =
             User,
             func.count(Order.id),
             done_cnt,
-            func.coalesce(done_sum, 0),
+            done_sum,
             active_cnt,
             func.max(Order.created_at),
         )
         .outerjoin(Order, Order.user_id == User.id)
         .group_by(User.id)
-        .order_by(func.coalesce(func.max(Order.created_at), User.created_at).desc())
+        .order_by(
+            func.coalesce(func.max(Order.created_at), User.created_at).desc()
+        )
         .limit(limit)
     )
     if only_cold:
@@ -51,7 +57,7 @@ async def user_rows(session: AsyncSession, only_cold: bool = False, limit: int =
 
     rows = (await session.execute(stmt)).all()
     return [
-        UserRow(user=r[0], oreders=r[1], done=r[2],
+        UserRow(user=r[0], orders=r[1], done=r[2],
                 turnover=r[3], active=r[4], last_seen=r[5])
         for r in rows
     ]
