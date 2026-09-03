@@ -76,3 +76,21 @@ def payment_text(order: Order, requisites: str) -> str:
         f"Копейки в сумме — идентификатор платежа, не округляй.\n"
         f"Курс держится до {order.expires_at:%H:%M} UTC."
     )
+
+
+def user_line(row) -> str:
+    u = row.user
+    name = escape(u.full_name or "без имени")
+    handle = f" @{escape(u.username)}" if u.username else ""
+    link = f'<a href="tg://user?id={u.tg_id}">{name}</a>'
+
+    if row.done:
+        tail = f"{row.done} опл. · {row.turnover} ₽"
+    elif row.active:
+        tail = f"⏳ {row.active} в работе"
+    elif row.orders:
+        tail = f"{row.orders} заявок, ни одной оплаты"
+    else:
+        tail = "только зашёл"
+
+    return f"{link}{handle} — {tail}"

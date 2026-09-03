@@ -16,7 +16,8 @@ from ..config import settings
 from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
 from ..services.rates import all_rates, set_settle_rate, set_cross
-from ..views import card, kb_admin, payment_text
+from ..services.users import user_rows, user_totals
+from ..views import card, kb_admin, payment_text, user_line
 from ..models import Service, OrderLog
 
 router = Router()
@@ -27,6 +28,7 @@ A_RATE = "💱 Курсы"
 A_ORDERS = "📂 Активные"
 A_STATS = "📊 Статистика"
 A_SVC = "🗂 Сервисы"
+A_USERS = "👥 Клиенты"
 
 
 class AdminFlow(StatesGroup):
@@ -45,6 +47,16 @@ def admin_menu() -> ReplyKeyboardMarkup:
     b.add(KeyboardButton(text=A_SVC))
     b.adjust(2, 2)
     return b.as_markup(resize_keyboard=True)
+
+
+def kb_users(only_cold: bool):
+    b = InlineKeyboardBuilder()
+    if only_cold:
+        b.button(text="Показать всех", callback_data="users:all")
+    else:
+        b.button(text="Только без оплат", callback_data="users:cold")
+    b.adjust(1)
+    return b.as_markup()
 
 
 @router.message(Command("admin"))
@@ -400,3 +412,40 @@ async def on_dm(
     await session.commit()
     await state.clear()
     await msg.answer(f"Отправлено по #{order.id}")
+
+
+
+async def users_text(session: AsyncSession, only_cold: bool) -> str:
+    rows = await user_rows(session, only_cold=only_cold)
+    totals = await user_totals(session)
+
+    head = (
+        f"<b>Клиенты</b> — всего {totals['total']}, "
+        f"с оплатами {totals['buyers']}"
+    )
+    if not rows:
+        return f"{head}\n\nпусто"
+
+    title = "Без оплат:" if only_cold else "Последние:"
+    body = "\n".join(user_line(r) for r in rows)
+    return f"{head}\n\n{title}\n{body}"
+
+
+@router.message(F.text == A_USERS)
+async def on_users(msg: Message, session: AsyncSession) -> None:
+    await msg.answer(
+        await users_text(session, only_cold=False),
+        reply_markup=kb_users(False),
+        disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data.in_({"users:all", "users:cold"}))
+async def on_users_toggle(cb: CallbackQuery, session: AsyncSession) -> None:
+    only_cold = cb.data == "users:cold"
+    await cb.message.edit_text(
+        await users_text(session, only_cold=only_cold),
+        reply_markup=kb_users(only_cold),
+        disable_web_page_preview=True,
+    )
+    await cb.answer()
