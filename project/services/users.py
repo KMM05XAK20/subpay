@@ -12,7 +12,7 @@ from ..order_states import ACTIVE, OrderStatus
 @dataclass
 class UserRow:
     user: User
-    oreders: int
+    orders: int
     done: int
     turnover: Decimal
     active: int
