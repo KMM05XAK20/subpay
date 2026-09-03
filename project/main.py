@@ -16,7 +16,8 @@ from .db import init_models, sessionmaker
 from .handlers import admin, client
 from .middlewares.db import DbSessionMiddleware
 from .middlewares.users import UserMiddleware
-from .services.orders import expire_stale
+from .services.orders import expire_stale, mark_pinged, stuck_orders
+from .views import card, kb_admin
 
 
 
@@ -57,6 +58,32 @@ async def expire_job(bot: Bot) -> None:
             except Exception:
                 logging.exception("не уведомил %s", order.user.tg_id)
 
+from .services.orders import expire_stale, mark_pinged, stuck_orders
+from .views import card, kb_admin
+
+
+async def stuck_job(bot: Bot) -> None:
+    async with sessionmaker() as session:
+        orders = await stuck_orders(session)
+        if not orders:
+            return
+
+        now = datetime.now(timezone.utc)
+        for order in orders:
+            hours = int((now - order.paid_at).total_seconds() // 3600)
+            try:
+                await bot.send_message(
+                    settings.admin_id,
+                    f"⏰ <b>Заявка #{order.id} висит {hours} ч</b>\n"
+                    f"Клиент заплатил, но заявка не закрыта.\n\n"
+                    f"{card(order)}",
+                    reply_markup=kb_admin(order),
+                )
+                await mark_pinged(session, order)
+            except Exception:
+                logging.exception("не отправил пинг по #%s", order.id)
+
+        await session.commit()
 
 async def main() -> None:
     logging.basicConfig(
@@ -85,6 +112,7 @@ async def main() -> None:
     
     sched = AsyncIOScheduler()
     sched.add_job(expire_job, "interval", minutes=1, args=(bot,))
+    sched.add_job(stuck_job, "interval", minutes=10, args=(bot,))
     sched.start()
 
     await setup_commands(bot)

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     default_markup_pct: float = 20.0
     max_active_orders: int = 3
     cross_buffer_pct: float = 2.0
+    stale_paid_minutes: int = 60      # через сколько напомнить
+    ping_repeat_minutes: int = 60     # как часто повторять
 
 
 settings = Settings()

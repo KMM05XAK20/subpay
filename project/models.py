@@ -23,7 +23,6 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
     full_name: Mapped[str | None] = mapped_column(String(128))
-    
     is_blocked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -85,6 +84,9 @@ class Order(Base):
     payment_link: Mapped[str | None] = mapped_column(Text)  # инвойс от клиента
     client_note: Mapped[str | None] = mapped_column(Text)
     admin_note: Mapped[str | None] = mapped_column(Text)
+
+    pinged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
     # факт — для честного P&L, а не по прайсу
     cost_rub: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))

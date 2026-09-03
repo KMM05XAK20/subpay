@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +11,7 @@ from ..order_states import ACTIVE, TERMINAL, OrderStatus, check_transition
 from ..pricing import calc_quote, expires_at, pick_pay_code
 
 LOAD = (selectinload(Order.user),)
+STUCK = (OrderStatus.PAID, OrderStatus.IN_PROGRESS, OrderStatus.REFUND_PENDING)
 
 
 async def get_order(session: AsyncSession, order_id: int) -> Order | None:
@@ -37,12 +38,36 @@ async def transition(
         order.paid_at = now
     if dst in TERMINAL:
         order.closed_at = now
+        order.pinged_at = None
 
     session.add(OrderLog(order_id=order.id, src=src, dst=dst,
                          actor=actor, comment=comment))
     await session.flush()
     return order
 
+
+async def stuck_orders(session: AsyncSession) -> list[Order]:
+    """Оплаченные/в работе заявки, которые висят дольше порога."""
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=settings.stale_paid_minutes)
+    repeat_before = now - timedelta(minutes=settings.ping_repeat_minutes)
+
+    stmt = (
+        select(Order)
+        .where(
+            Order.status.in_(STUCK),
+            Order.paid_at.is_not(None),
+            Order.paid_at < stale_before,
+            or_(Order.pinged_at.is_(None), Order.pinged_at < repeat_before),
+        )
+        .order_by(Order.paid_at)
+        .options(*LOAD)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def mark_pinged(session: AsyncSession, order: Order) -> None:
+    order.pinged_at = datetime.now(timezone.utc)
 
 async def count_active(session: AsyncSession, user: User) -> int:
     return await session.scalar(
