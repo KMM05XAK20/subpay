@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select, cast
+from sqlalchemy import func, select, cast, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Order, User
