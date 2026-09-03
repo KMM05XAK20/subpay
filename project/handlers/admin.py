@@ -44,6 +44,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
     b.add(KeyboardButton(text=A_RATE))
     b.add(KeyboardButton(text=A_ORDERS))
     b.add(KeyboardButton(text=A_STATS))
+    b.add(KeyboardButton(text=A_USERS))
     b.add(KeyboardButton(text=A_SVC))
     b.adjust(2, 2)
     return b.as_markup(resize_keyboard=True)
