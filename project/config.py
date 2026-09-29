@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     cross_buffer_pct: float = 2.0
     stale_paid_minutes: int = 60      # через сколько напомнить
     ping_repeat_minutes: int = 60     # как часто повторять
+    webapp_url: str | None = None     # https-адрес Mini App (WEBAPP_URL)
+    web_host: str = "0.0.0.0"
+    web_port: int = 8080
 
 
 settings = Settings()

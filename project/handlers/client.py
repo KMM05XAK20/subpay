@@ -17,6 +17,7 @@ from ..order_states import OrderStatus
 from ..services import orders as svc
 from ..services.rates import set_settle_rate, all_rates
 from ..services.rates import available_currencies, get_quote_input
+from ..services import workflow as wf
 from ..views import card, kb_admin, order_line
 from ..pricing import calc_quote
 import logging
@@ -58,7 +59,7 @@ def main_menu() -> ReplyKeyboardMarkup:
 async def on_start(msg: Message, state: FSMContext) -> None:
     await state.clear()
     await msg.answer(
-        "<b>Оплачиваю зарубежные сервисы</b>\n\n"
+        "👋 <b>Оплачиваю зарубежные сервисы</b>\n\n"
         "Подписки, облака, инструменты для работы — всё, что не проходит "
         "российской картой.\n\n"
         "<b>Как это работает</b>\n"
@@ -71,6 +72,22 @@ async def on_start(msg: Message, state: FSMContext) -> None:
         f"Вопросы: @{settings.support_username}",
         reply_markup=main_menu(),
     )
+    kb = wf.open_kb(text="Открыть приложение")
+    if kb:
+        await msg.answer(
+            "📱 <b>Удобнее в приложении</b> — калькулятор, заявки и статусы "
+            "в одном месте.",
+            reply_markup=kb,
+        )
+
+
+@router.message(Command("app"))
+async def on_app(msg: Message) -> None:
+    kb = wf.open_kb(text="Открыть приложение")
+    if kb is None:
+        await msg.answer("Приложение пока не подключено. Пользуйся меню бота.")
+        return
+    await msg.answer("📱 Всё в одном месте:", reply_markup=kb)
 
 @router.message(Command("rules"))
 @router.message(F.text == BTN_RULES)
@@ -110,7 +127,7 @@ async def on_new(
     b.adjust(2)
 
     await state.set_state(NewOrder.service)
-    await msg.answer("Какой сервис?", reply_markup=b.as_markup())
+    await msg.answer("🧾 <b>Новая заявка</b>\nКакой сервис оплатить?", reply_markup=b.as_markup())
 
 
 @router.callback_query(NewOrder.service, F.data.startswith("svc:"))
@@ -125,17 +142,6 @@ async def on_service(cb: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(NewOrder.amount)
         await cb.message.edit_text("Сумма в валюте сервиса? Например: 19.99")
     await cb.answer()
-
-@router.message(CommandStart())
-async def on_start(msg: Message, state: FSMContext) -> None:
-    await state.clear()
-    await msg.answer("Оплачиваю зарубежные сервисы.\n\n"
-        "/new — новая заявка\n"
-        "/my — мои заявки\n"
-        "/rules — правила\n\n"
-        "Порядок: сервис и сумма → я подтверждаю → реквизиты → "
-        "ты платишь → я оплачиваю.\n\n"
-        "Вопросы: @knaa005")
 
 @router.message(Command("cancel"))
 async def on_cancel_fsm(msg: Message, state: FSMContext) -> None:
@@ -237,13 +243,14 @@ async def on_amount(
     await state.set_state(NewOrder.confirm)
 
     b = InlineKeyboardBuilder()
-    b.button(text="Отправить", callback_data=f"cl:submit:{order.id}")
-    b.button(text="Отмена", callback_data=f"cl:cancel:{order.id}")
+    b.button(text="✅ Отправить", callback_data=f"cl:submit:{order.id}")
+    b.button(text="✖️ Отмена", callback_data=f"cl:cancel:{order.id}")
 
     await msg.answer(
-        f"{amount} {currency} по курсу {order.client_rate} ₽\n"
-        f"К оплате: <b>{order.amount_rub} ₽</b>\n\n"
-        f"Точную сумму пришлю после подтверждения.",
+        f"🧾 <b>Расчёт</b>\n"
+        f"{amount} {currency} × {order.client_rate} ₽\n"
+        f"К оплате: <b>≈ {order.amount_rub} ₽</b>\n\n"
+        f"<i>Точную сумму с копейками пришлю после подтверждения.</i>",
         reply_markup=b.as_markup(),
     )
 
@@ -353,7 +360,8 @@ async def on_submit(
     await state.clear()
 
     await cb.message.edit_text(
-        f"Заявка #{order.id} отправлена. Отвечу в течение ~15 минут."
+        f"✅ <b>Заявка #{order.id} отправлена.</b>\nОтвечу в течение ~15 минут.",
+        reply_markup=wf.open_kb(order.id),
     )
     await bot.send_message(settings.admin_id, card(order),
                            reply_markup=kb_admin(order))
@@ -376,7 +384,7 @@ async def on_cancel(
     await svc.cancel(session, order)
     await session.commit()
     await state.clear()
-    await cb.message.edit_text(f"Заявка #{order.id} отменена.")
+    await cb.message.edit_text(f"✖️ Заявка #{order.id} отменена.")
     await cb.answer()
 
 
@@ -385,9 +393,12 @@ async def on_cancel(
 async def on_my(msg: Message, session: AsyncSession, user: User) -> None:
     rows = await svc.user_orders(session, user)
     if not rows:
-        await msg.answer("Заявок пока нет. /new")
+        await msg.answer("Заявок пока нет. Создай первую: /new")
         return
-    await msg.answer("\n".join(order_line(o) for o in rows))
+    await msg.answer(
+        "📂 <b>Мои заявки</b>\n\n" + "\n".join(order_line(o) for o in rows),
+        reply_markup=wf.open_kb(text="Подробнее в приложении"),
+    )
 
 
 @router.message(F.text == BTN_HELP)
@@ -413,19 +424,5 @@ async def on_client_reply(
     if order is None or order.user_id != user.id:
         return
 
-    text = msg.text or ""
-    handle = f" (@{escape(user.username)})" if user.username else ""
-    await bot.send_message(
-        settings.admin_id,
-        f"💬 <b>Ответ по #{order.id}</b>\n"
-        f'от <a href="tg://user?id={user.tg_id}">'
-        f"{escape(user.full_name or 'клиент')}</a>{handle}\n"
-        f"<blockquote>{escape(text)}</blockquote>",
-        reply_markup=kb_admin(order),
-    )
-
-    session.add(OrderLog(order_id=order.id, src=order.status,
-                         dst=order.status, actor="client",
-                         comment=f"← от клиента: {text[:200]}"))
-    await session.commit()
-    await msg.answer("Передал, отвечу скоро.")
+    await wf.forward_client_message(bot, session, user, order, msg.text or "")
+    await msg.answer("✅ Передал, отвечу скоро.")

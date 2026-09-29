@@ -1,14 +1,17 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.client.session.aiohttp import AiohttpSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+from aiogram.types import (
+    BotCommand, BotCommandScopeChat, BotCommandScopeDefault,
+    MenuButtonWebApp, WebAppInfo,
+)
 
 
 from .config import settings
@@ -17,13 +20,15 @@ from .handlers import admin, client
 from .middlewares.db import DbSessionMiddleware
 from .middlewares.users import UserMiddleware
 from .services.orders import expire_stale, mark_pinged, stuck_orders
+from .services.workflow import open_kb
 from .views import card, kb_admin
-
+from .web.server import start_web
 
 
 async def setup_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
+            BotCommand(command="app", description="Открыть приложение"),
             BotCommand(command="new", description="Новая заявка"),
             BotCommand(command="my", description="Мои заявки"),
             BotCommand(command="rules", description="Правила"),
@@ -34,6 +39,7 @@ async def setup_commands(bot: Bot) -> None:
     )
     await bot.set_my_commands(
         [
+            BotCommand(command="app", description="Открыть приложение"),
             BotCommand(command="admin", description="Админка"),
             BotCommand(command="rate", description="Курс доллара"),
             BotCommand(command="cross", description="Кросс-курс"),
@@ -44,6 +50,14 @@ async def setup_commands(bot: Bot) -> None:
         scope=BotCommandScopeChat(chat_id=settings.admin_id),
     )
 
+async def setup_menu_button(bot: Bot) -> None:
+    """Кнопка слева от поля ввода открывает Mini App."""
+    if not settings.webapp_url:
+        return
+    await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+        text="Открыть", web_app=WebAppInfo(url=settings.webapp_url)))
+
+
 async def expire_job(bot: Bot) -> None:
     async with sessionmaker() as session:
         stale = await expire_stale(session)
@@ -52,14 +66,12 @@ async def expire_job(bot: Bot) -> None:
             try:
                 await bot.send_message(
                     order.user.tg_id,
-                    f"Заявка #{order.id} истекла — курс изменился. "
+                    f"⌛ Заявка #{order.id} истекла — курс изменился.\n"
                     f"Оформи заново: /new",
+                    reply_markup=open_kb(text="Оформить заново"),
                 )
             except Exception:
                 logging.exception("не уведомил %s", order.user.tg_id)
-
-from .services.orders import expire_stale, mark_pinged, stuck_orders
-from .views import card, kb_admin
 
 
 async def stuck_job(bot: Bot) -> None:
@@ -109,19 +121,23 @@ async def main() -> None:
     dp.include_router(admin.router)   # первым: у него фильтр по admin_id
     dp.include_router(client.router)
 
-    
+    web_runner = await start_web(bot, sessionmaker)
     sched = AsyncIOScheduler()
     sched.add_job(expire_job, "interval", minutes=1, args=(bot,))
     sched.add_job(stuck_job, "interval", minutes=10, args=(bot,))
     sched.start()
 
     await setup_commands(bot)
-    await bot.send_message(settings.admin_id, "Бот поднялся")
-    
+    await setup_menu_button(bot)
+    await bot.send_message(
+        settings.admin_id, "🟢 Бот поднялся", reply_markup=open_kb(text="Открыть панель")
+    )
+
     try:
         await dp.start_polling(bot)
     finally:
         sched.shutdown(wait=False)
+        await web_runner.cleanup()
         await bot.session.close()
 
 

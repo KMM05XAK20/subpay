@@ -17,7 +17,8 @@ from ..order_states import OrderStatus, TransitionError, TITLES
 from ..services import orders as svc
 from ..services.rates import all_rates, set_settle_rate, set_cross
 from ..services.users import user_rows, user_totals
-from ..views import card, kb_admin, payment_text, user_line
+from ..services import workflow as wf
+from ..views import card, kb_admin, user_line
 from ..models import Service, OrderLog
 
 router = Router()
@@ -63,14 +64,17 @@ def kb_users(only_cold: bool):
 @router.message(Command("admin"))
 async def on_admin(msg: Message, state: FSMContext) -> None:
     await state.clear()
-    await msg.answer("Админка", reply_markup=admin_menu())
+    await msg.answer("🛠 <b>Админка</b>", reply_markup=admin_menu())
+    kb = wf.open_kb(text="Открыть панель")
+    if kb:
+        await msg.answer("📱 Полная панель — в приложении:", reply_markup=kb)
 
-async def notify(bot: Bot, tg_id: int, text: str) -> None:
-    try:
-        await bot.send_message(tg_id, text)
-    except Exception:
-        logging.exception("не доставил сообщение %s", tg_id)
 
+@router.message(Command("app"))
+async def on_app(msg: Message) -> None:
+    kb = wf.open_kb(text="Открыть панель")
+    await msg.answer("📱 Панель управления:" if kb else
+                     "WEBAPP_URL не задан", reply_markup=kb)
 
 @router.message(Command("rate"))
 async def on_rate(msg: Message, session: AsyncSession) -> None:
@@ -183,10 +187,12 @@ async def on_stats(msg: Message, session: AsyncSession) -> None:
     day = await svc.stats_since(session, now - timedelta(days=1))
     week = await svc.stats_since(session, now - timedelta(days=7))
     await msg.answer(
-        f"<b>24 часа</b>: {day['count']} шт · "
-        f"{day['turnover']} ₽ · профит {day['profit']} ₽\n"
-        f"<b>7 дней</b>: {week['count']} шт · "
-        f"{week['turnover']} ₽ · профит {week['profit']} ₽"
+        "📊 <b>Статистика</b>\n\n"
+        f"<b>24 часа</b>\n{day['count']} шт · {day['turnover']} ₽ · "
+        f"профит <b>{day['profit']} ₽</b>\n\n"
+        f"<b>7 дней</b>\n{week['count']} шт · {week['turnover']} ₽ · "
+        f"профит <b>{week['profit']} ₽</b>",
+        reply_markup=wf.open_kb(text="Подробнее"),
     )
 
 @router.message(F.text == A_ORDERS)
@@ -255,99 +261,43 @@ async def on_action(
         await cb.answer("Заявка не найдена", show_alert=True)
         return
 
-    admin = cb.from_user.id
+    if action == "msg":
+        await state.set_state(AdminFlow.dm_input)
+        await state.update_data(order_id=order.id)
+        await cb.message.answer(
+            f"💬 Что написать клиенту по #{order.id}? Отправь текст или /cancel"
+        )
+        await cb.answer()
+        return
 
-    expected = {
-        "approve": OrderStatus.REVIEW,
-        "reject": OrderStatus.REVIEW,
-        "msg": None,                                # ??
-        "paid": OrderStatus.AWAITING_PAYMENT,
-        "expire": OrderStatus.AWAITING_PAYMENT,
-        "work": OrderStatus.PAID,
-        "done": OrderStatus.IN_PROGRESS,
-        "refund": (OrderStatus.PAID, OrderStatus.IN_PROGRESS),
-        "refunded": OrderStatus.REFUND_PENDING,
-    }.get(action)
-    
     current = OrderStatus(order.status)
-    allowed = expected if isinstance(expected, tuple) else (expected,)
-    if expected is not None and current not in allowed:
+    allowed = wf.EXPECTED.get(action)
+    if allowed is not None and current not in allowed:
         await cb.answer(f"Уже обработано ({TITLES[current]})", show_alert=True)
         await cb.message.edit_text(card(order), reply_markup=kb_admin(order))
         return
 
+    if action == "reject":
+        await state.set_state(AdminFlow.reject_reason)
+        await state.update_data(order_id=order.id)
+        await cb.message.answer(f"⛔ #{order.id}: причина отказа?")
+        await cb.answer()
+        return
+
+    if action == "done":
+        await state.set_state(AdminFlow.cost_input)
+        await state.update_data(order_id=order.id)
+        await cb.message.answer(
+            f"🏁 #{order.id}: сколько реально ушло, ₽? (0 — пропустить)"
+        )
+        await cb.answer()
+        return
+
     try:
-        if action == "approve":
-            await svc.approve(session, order, admin)
-            await session.commit()
-            await notify(bot, order.user.tg_id,
-                         payment_text(order, settings.requisites))
-            toast = "Принято"
-
-        elif action == "reject":
-            await state.set_state(AdminFlow.reject_reason)
-            await state.update_data(order_id=order.id)
-            await cb.message.answer(f"#{order.id}: причина отказа?")
-            await cb.answer()
-            return
-
-        elif action == "msg":
-            await state.set_state(AdminFlow.dm_input)
-            await state.update_data(order_id=order.id)
-            await cb.message.answer(
-                f"Что написать клиенту по #{order.id}? "
-                f"Отправь текст или /cancel"
-            )
-            await cb.answer()
-            return
-
-        elif action == "paid":
-            await svc.confirm_payment(session, order, admin)
-            await session.commit()
-            await notify(bot, order.user.tg_id,
-                         f"Оплата по #{order.id} получена, работаю.")
-            toast = "Оплата подтверждена"
-
-        elif action == "work":
-            await svc.start_work(session, order, admin)
-            await session.commit()
-            toast = "В работе"
-
-        elif action == "done":
-            await state.set_state(AdminFlow.cost_input)
-            await state.update_data(order_id=order.id)
-            await cb.message.answer(
-                f"#{order.id}: сколько реально ушло, ₽? (0 — пропустить)"
-            )
-            await cb.answer()
-            return
-
-        elif action == "refund":
-            await svc.to_refund(session, order, admin, "ручной возврат")
-            await session.commit()
-            await notify(bot, order.user.tg_id,
-                         f"По #{order.id} выполнить не смог, оформляю возврат. "
-                         f"Пришли реквизиты для возврата.")
-            toast = "Возврат"
-
-        elif action == "refunded":
-            await svc.refunded(session, order, admin)
-            await session.commit()
-            await notify(bot, order.user.tg_id,
-                         f"Возврат по #{order.id} отправлен.")
-            toast = "Возвращено"
-
-        elif action == "expire":
-            await svc.transition(session, order, OrderStatus.EXPIRED,
-                                 actor=f"admin:{admin}")
-            await session.commit()
-            toast = "Протухла"
-        else:
-            await cb.answer("Неизвестное действие", show_alert=True)
-            return
-
-    except TransitionError as exc:
-        await session.rollback()
+        toast = await wf.perform(
+            session, bot, order, action, cb.from_user.id, reason="ручной возврат"
+        )
+    except wf.ActionError as exc:
         await cb.answer(str(exc), show_alert=True)
         return
 
@@ -361,11 +311,13 @@ async def on_reject_reason(
 ) -> None:
     data = await state.get_data()
     order = await svc.get_order(session, data["order_id"])
-    await svc.reject(session, order, msg.from_user.id, msg.text or "")
-    await session.commit()
-    await notify(bot, order.user.tg_id,
-                 f"Заявка #{order.id} отклонена: {msg.text}")
-    await msg.answer(f"Отклонена #{order.id}")
+    try:
+        await wf.perform(session, bot, order, "reject", msg.from_user.id,
+                         reason=msg.text or "")
+    except wf.ActionError as exc:
+        await msg.answer(str(exc))
+        return
+    await msg.answer(f"⛔ Отклонена #{order.id}")
     await state.clear()
 
 
@@ -381,13 +333,17 @@ async def on_cost(
 
     data = await state.get_data()
     order = await svc.get_order(session, data["order_id"])
-    await svc.complete(session, order, msg.from_user.id,
-                       cost_rub=cost if cost > 0 else None)
-    await session.commit()
-
-    await notify(bot, order.user.tg_id, f"Заявка #{order.id} выполнена ✅")
-    await msg.answer(f"Закрыта #{order.id}. Профит: {order.profit_rub or '—'} ₽")
+    try:
+        await wf.perform(session, bot, order, "done", msg.from_user.id, cost=cost)
+    except wf.ActionError as exc:
+        await msg.answer(str(exc))
+        await state.clear()
+        return
+    await msg.answer(
+        f"✅ Закрыта #{order.id}. Профит: <b>{order.profit_rub or '—'} ₽</b>"
+    )
     await state.clear()
+
 
 @router.message(AdminFlow.dm_input)
 async def on_dm(
@@ -400,20 +356,9 @@ async def on_dm(
         await msg.answer("Заявка не найдена")
         return
 
-    text = msg.text or ""
-    sent = await bot.send_message(
-        order.user.tg_id,
-        f"📨 <b>Сообщение по заявке #{order.id}</b>\n"
-        f"<blockquote>{escape(text)}</blockquote>\n"
-        f"<i>Ответь на это сообщение, чтобы написать мне.</i>",
-    )
-    session.add(OrderLog(order_id=order.id, src=order.status,
-                         dst=order.status, actor=f"admin:{msg.from_user.id}",
-                         comment=f"→ клиенту: {text[:200]}"))
-    await session.commit()
+    await wf.send_to_client(bot, session, order, msg.from_user.id, msg.text or "")
     await state.clear()
-    await msg.answer(f"Отправлено по #{order.id}")
-
+    await msg.answer(f"📨 Отправлено по #{order.id}")
 
 
 async def users_text(session: AsyncSession, only_cold: bool) -> str:

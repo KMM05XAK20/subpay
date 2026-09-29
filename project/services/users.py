@@ -71,3 +71,16 @@ async def user_totals(session: AsyncSession) -> dict:
         .where(Order.status == OrderStatus.DONE)
     ) or 0
     return {"total": total, "buyers": buyers}
+
+async def get_or_create_user(
+    session: AsyncSession, tg_id: int, username: str | None, full_name: str | None
+) -> User:
+    user = await session.scalar(select(User).where(User.tg_id == tg_id))
+    if user is None:
+        user = User(tg_id=tg_id, username=username, full_name=full_name)
+        session.add(user)
+    elif user.username != username or user.full_name != full_name:
+        user.username = username
+        user.full_name = full_name
+    await session.commit()
+    return user

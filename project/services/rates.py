@@ -48,7 +48,7 @@ async def set_cross(
     """Сколько долларов в единице валюты."""
     row = await session.get(Rate, currency)
     if row is None:
-        session.add(Rate(currency=currency, to_usd=to_usd))
+        session.add(Rate(currency=currency, base_rate=Decimal(0), to_usd=to_usd))
     else:
         row.to_usd = to_usd
     await session.commit()
