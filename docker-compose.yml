@@ -22,6 +22,8 @@ services:
   bot:
     build: .
     env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"   # Mini App: проксируй через HTTPS (nginx/caddy)
     environment:
       DB_URL: postgresql+asyncpg://subs:${DB_PASSWORD}@db:5432/subs
       REDIS_URL: redis://redis:6379/0

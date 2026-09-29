@@ -3,7 +3,7 @@ from html import escape
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .models import Order
-from .order_states import TITLES, OrderStatus, TERMINAL
+from .order_states import TITLES, OrderStatus, TERMINAL, status_label
 
 
 def kb_admin(order: Order):
@@ -38,43 +38,44 @@ def card(order: Order) -> str:
     name =  escape(order.user.full_name or "клиент")
     handle = f" (@{escape(order.user.username)})" if order.user.username else ""
     lines = [
-        f"<b>Заявка #{order.id}</b> — {TITLES[OrderStatus(order.status)]}",
-        f"Сервис: {escape(order.service_title)}",
-        f"К оплате: {order.amount_foreign} {order.currency}",
-        f"Курс: {order.base_rate} → {order.client_rate} (+{order.markup_pct}%)",
-        f"С клиента: <b>{order.total_rub} ₽</b>",
-        f'Клиент: <a href="tg://user?id={order.user.tg_id}">{name}</a>{handle}',
+        f"<b>Заявка #{order.id}</b> · {status_label(order.status)}",
+        "",
+        f"🛒 {escape(order.service_title)}",
+        f"💵 {order.amount_foreign} {order.currency}",
+        f"📈 Курс: {order.base_rate} → {order.client_rate} (+{order.markup_pct}%)",
+        f"💰 С клиента: <b>{order.total_rub} ₽</b>",
+        f'👤 <a href="tg://user?id={order.user.tg_id}">{name}</a>{handle}',
     ]
     if order.payment_link:
-        lines.append(f"Ссылка: {escape(order.payment_link)}")
+        lines.append(f"🔗 Ссылка: {escape(order.payment_link)}")
     if order.client_note:
-        lines.append(f"Коммент: {escape(order.client_note)}")
+        lines.append(f"💬 Коммент: {escape(order.client_note)}")
     if order.admin_note:
-        lines.append(f"Заметка: {escape(order.admin_note)}")
+        lines.append(f"📝 Заметка: {escape(order.admin_note)}")
     if order.amount_usd is not None and order.currency != "USD":
-        lines.append(f"Тебе платить: <b>{order.amount_usd} USD</b>")
+        lines.append(f"🧾 Тебе платить: <b>{order.amount_usd} USD</b>")
     if order.cost_rub is not None:
         lines.append(
-            f"Себестоимость: {order.cost_rub} ₽ | Профит: {order.profit_rub} ₽"
+            f"📊 Себестоимость: {order.cost_rub} ₽ · профит: <b>{order.profit_rub} ₽</b>"
         )
     return "\n".join(lines)
 
 
 def order_line(order: Order) -> str:
     return (
-        f"#{order.id} · {escape(order.service_title)} · "
+        f"<b>#{order.id}</b> · {escape(order.service_title)} · "
         f"{order.amount_foreign} {order.currency} · "
-        f"{order.total_rub} ₽ · {TITLES[OrderStatus(order.status)]}"
+        f"{order.total_rub} ₽\n     {status_label(order.status)}"
     )
 
 
 def payment_text(order: Order, requisites: str) -> str:
     return (
-        f"Заявка #{order.id} принята.\n\n"
+        f"✅ <b>Заявка #{order.id} принята</b>\n\n"
         f"Переведи <b>ровно {order.total_rub} ₽</b>\n"
-        f"{escape(requisites)}\n\n"
+        f"<blockquote>{escape(requisites)}</blockquote>\n"
         f"Копейки в сумме — идентификатор платежа, не округляй.\n"
-        f"Курс держится до {order.expires_at:%H:%M} UTC."
+        f"⏱ Курс держится до {order.expires_at:%H:%M} UTC."
     )
 
 

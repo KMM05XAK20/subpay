@@ -48,6 +48,26 @@ TITLES: dict[OrderStatus, str] = {
     OrderStatus.REFUNDED: "возвращена",
 }
 
+EMOJI: dict[OrderStatus, str] = {
+    OrderStatus.DRAFT: "📝",
+    OrderStatus.REVIEW: "🕐",
+    OrderStatus.AWAITING_PAYMENT: "💳",
+    OrderStatus.PAID: "💰",
+    OrderStatus.IN_PROGRESS: "⚙️",
+    OrderStatus.DONE: "✅",
+    OrderStatus.EXPIRED: "⌛",
+    OrderStatus.REJECTED: "⛔",
+    OrderStatus.CANCELED: "✖️",
+    OrderStatus.REFUND_PENDING: "↩️",
+    OrderStatus.REFUNDED: "↩️",
+}
+
+
+def status_label(status: "OrderStatus | str") -> str:
+    st = OrderStatus(status)
+    return f"{EMOJI[st]} {TITLES[st]}"
+
+
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.DRAFT: {OrderStatus.REVIEW, OrderStatus.CANCELED},
     OrderStatus.REVIEW: {OrderStatus.AWAITING_PAYMENT, OrderStatus.REJECTED},

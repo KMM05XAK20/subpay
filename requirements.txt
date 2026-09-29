@@ -5,3 +5,4 @@ alembic==1.14.0
 APScheduler==3.10.4
 redis==5.2.0
 pydantic-settings==2.6.1
+aiohttp>=3.9
